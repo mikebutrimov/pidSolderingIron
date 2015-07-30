@@ -3,8 +3,6 @@
 #include <PID_v1.h>
 Adafruit_PCD8544 display = Adafruit_PCD8544(6, 5, 4, 3, 2);
 
-
-
 class Button {
   public:
     Button(int pin);
@@ -19,6 +17,22 @@ class Button {
     unsigned long  _shortPressTimer;
     unsigned long  _longPressTimer;
 };
+
+Button upButton = Button(11);
+Button downButton = Button(12);
+int newTemperature = 220;
+int oldTemperature = 220;
+int maxTemperature = 300;
+int currentTemp = 0;
+int oldCurrentTemp = 0;
+int pwnOutputPin = 10;
+int temperatureInputPin = 17;
+float pwmThrottle = 0;
+int clearDisplay = 0;  
+unsigned long coolDownDisplay = 0;
+int displayDelay = 2000;
+double Input,Output,Setpoint;
+PID termalPID(&Input, &Output, &Setpoint,1,4,3, DIRECT);
 
 Button::Button(int pin){
   //LES CONSTRUTOR
@@ -86,31 +100,16 @@ if (_buttonState == 3){
 return _buttonState;
 }
 
-
-Button lesButton = Button(26);
-Button upButton = Button(30);
-Button downButton = Button(25);
-int newTemperature = 0;
-int oldTemperature = 0;
-int maxTemperature = 300;
-int currentTemperature = 0;
-unsigned long coolDownDisplay = 0;
-int displayDelay = 2000;
-double Input,Output,Setpoint;
-PID termalPID(&Input, &Output, &Setpoint,1,4,3, DIRECT);
-
 void processButtons(){
   int upButtonState = upButton.processState();
-  //int downButtonState = downButton.processState();
-  int downButtonState = 0;
+  int downButtonState = downButton.processState();
   if (upButtonState == downButtonState){
     //do fucking nothing!
   }
   if (upButtonState > 0){
     if (upButtonState == 2){
-      if ((millis()/300)%3 == 2){
-        newTemperature = riseTemperature(oldTemperature);
-      }
+      delay(200);  
+      newTemperature = riseTemperature(oldTemperature);
     }
     else {
       newTemperature = riseTemperature(oldTemperature);
@@ -118,9 +117,15 @@ void processButtons(){
     coolDownDisplay = millis();
   }
   if (downButtonState > 0){
-    newTemperature = lowerTemperature(oldTemperature);
+    if (downButtonState == 2){
+      delay(200);  
+      newTemperature = lowerTemperature(oldTemperature);
+    }
+    else {
+      newTemperature = lowerTemperature(oldTemperature);
+    }    
     coolDownDisplay = millis();
-  } 
+  }
 }
 
 int riseTemperature (int temp){
@@ -141,16 +146,6 @@ int lowerTemperature (int temp){
   return returnedTemp;
 }
 
-void displayDisplayable(int newTemperature, int oldTemperature){
-    
-  if (millis() < (coolDownDisplay + displayDelay)){
-    Serial.println("outputing target temp");
-  }
-  else {
-    Serial.println("output CURRENT temp and pwm");
-  }
-}
-
 void displayMsg(String msg, Adafruit_PCD8544 display, int line = 0, int tab = 0, int txtSize = 1){
   display.display();
   display.setCursor(line, tab);
@@ -164,21 +159,102 @@ void displayMsg(String msg, Adafruit_PCD8544 display, int line = 0, int tab = 0,
   } 
 }
 
+void displayDisplayable(int newTemperature, int oldTemperature){
+  if (millis() < (coolDownDisplay + displayDelay)){
+    if (newTemperature!=oldTemperature){
+      display.clearDisplay();
+      for (int y = 9; y< 38; y++){
+        for (int x = 0; x< 84; x++){
+          display.drawPixel(x,y,0);
+        }
+      }
+    }
+    displayMsg("New target:", display);
+    displayMsg((String)newTemperature,display, 0, 9, 4);
+    display.display();
+    clearDisplay = 1;
+  }
+  else {
+    if (clearDisplay == 1){
+      display.clearDisplay();
+      clearDisplay = 0;
+    }
+    int ololo;  
+    int ct0 = currentTemp / 100;
+    int ct1 = (currentTemp % 100) / 10;
+    int ct2 = (currentTemp % 10);
+    int oct0 = oldCurrentTemp / 100;
+    int oct1 = (oldCurrentTemp % 100) / 10;
+    int oct2 = (oldCurrentTemp % 10);
+    if (ct0 !=0 ){
+      ololo = 0;
+      if (ct0 == oct0){
+        ololo = 24;
+      }
+      if (ct0 == oct0 && ct1 == oct1){
+        ololo = 56;
+      }
+      if (ct0 == oct0 && ct1 == oct1 && ct2 == oct2){
+        ololo = 84;
+      }
+    }
+    if ( ct0 == 0){
+      ololo = 0;
+      if (ct1 == oct1){
+        ololo = 24;
+      }
+      if (ct1 == oct1 && ct2 == oct2){
+        ololo = 56;
+      }
+      
+    }
+
+    displayMsg("Current temp:", display);
+    displayMsg((String)currentTemp,display, 0, 9, 4);
+    displayMsg("pwm: ",display,0,38,1);
+    displayMsg((String)pwmThrottle,display,25,38,1);
+    display.display();
+        
+    for (int y = 9; y< 37; y++){
+      for (int x = ololo;x<84;x++){
+        display.drawPixel(x,y,0);
+      }
+    }
+    for (int y = 38; y< 48; y++){
+      for (int x = 24; x< 84; x++){
+        display.drawPixel(x,y,0);
+      }
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
+  termalPID.SetMode(AUTOMATIC);
+  pinMode(pwnOutputPin, OUTPUT);
+  pinMode(temperatureInputPin, INPUT);
+  display.begin();
+  display.clearDisplay();
+  display.display();
+  display.setContrast(60);
+  delay(1000);
 }
 
 void loop() {
   processButtons();
+  currentTemp = ((analogRead(temperatureInputPin)*0.6)+20);
+  Input = currentTemp;
+  Setpoint = newTemperature;
+  termalPID.Compute();
+  analogWrite(pwnOutputPin,Output);
+  pwmThrottle = Output;
   displayDisplayable(newTemperature, oldTemperature);
-
-  Serial.print(newTemperature);
-  Serial.print("       ");
-  Serial.println(oldTemperature);
-  oldTemperature = newTemperature;
-  delay(100);
-
+  if (newTemperature != oldTemperature){
+    oldTemperature = newTemperature;
+  }
+  oldCurrentTemp = currentTemp;
+  //Serial.println(millis());
+  delay(50);
 }
 
 
